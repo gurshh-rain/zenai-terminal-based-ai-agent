@@ -1,0 +1,2 @@
+open chess.com and start a 3 minute match
+exit
