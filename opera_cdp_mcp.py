@@ -488,6 +488,27 @@ async def list_tools() -> list[Tool]:
             "properties": {"expression": {"type": "string"}},
             "required": ["expression"],
         }),
+        Tool(name="browser_open_tabs", description=(
+            "Open multiple URLs at once, EACH in its OWN new tab. Use this whenever "
+            "the user asks to 'open N tabs', 'open each of these', 'open a few "
+            "different sources', etc. — do NOT loop browser_navigate (that reuses "
+            "the active tab) and do NOT loop browser_tabs(action='open') (the model "
+            "is unreliable at planning N separate calls; this single call does the "
+            "whole job). URLs that fail to load are reported but do not abort the "
+            "rest of the batch."
+        ), inputSchema={
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of 1-10 absolute http(s) URLs to open as separate tabs.",
+                    "minItems": 1,
+                    "maxItems": 10,
+                },
+            },
+            "required": ["urls"],
+        }),
     ]
 
 
@@ -636,6 +657,27 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if res.get("type") == "undefined":
                 return [TextContent(type="text", text="(undefined)")]
             return [TextContent(type="text", text=json.dumps(res, indent=2))]
+
+        if name == "browser_open_tabs":
+            urls = arguments.get("urls") or []
+            if not urls:
+                return [TextContent(type="text", text="browser_open_tabs: no urls provided")]
+            opened: list[str] = []
+            failed: list[str] = []
+            for u in urls:
+                if not isinstance(u, str) or not u.strip():
+                    continue
+                url = u.strip()
+                if not url.startswith(("http://", "https://")):
+                    url = "https://" + url
+                try:
+                    tid, _ = await browser.new_page(url)
+                    opened.append(f"- {tid}  {url}")
+                except Exception as e:
+                    failed.append(f"- {url}  ({type(e).__name__}: {e})")
+            head = f"opened {len(opened)} tab(s):\n" if opened else "no tabs opened\n"
+            tail = "\nfailed:\n" + "\n".join(failed) if failed else ""
+            return [TextContent(type="text", text=head + "\n".join(opened) + tail)]
 
         return [TextContent(type="text", text=f"unknown tool: {name}")]
     except Exception as e:
